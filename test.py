@@ -2,11 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 from tqdm import tqdm
-from sklearn.model_selection import KFold, train_test_split
-from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import KBinsDiscretizer
-import plotly.graph_objects as go
-
 
 class DecisionTree:
     def __init__(self, max_depth=10, min_gain=0.01, max_leaf=100):
@@ -94,7 +90,7 @@ class DecisionTree:
 
 
 class RandomForest:
-    def __init__(self, n_trees=10, max_depth=10, min_gain=0.01, max_leaf=100):
+    def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
         self.n_trees = n_trees
         self.max_depth = max_depth
         self.min_gain = min_gain
@@ -121,109 +117,32 @@ def preprocess_data(df, continuous_features, n_bins=10):
     return df
 
 
-def grid_search_with_cv(X, y):
-    param_grid = {
-        'max_depth': [5, 10, 15, 20],
-        # 'min_gain': [0.01, 0.05, 0.1],
-        # 'max_leaf': [50, 100, 150]
-        'min_gain': [0.05, 0.1],
-        'max_leaf': [100, 200]
-    }
-    best_params = None
-    best_mse = float('inf')
-    results = []
-
-    kf = KFold(n_splits=5)
-
-    for max_depth in param_grid['max_depth']:
-        for min_gain in param_grid['min_gain']:
-            for max_leaf in param_grid['max_leaf']:
-                model = RandomForest(n_trees=10, max_depth=max_depth, min_gain=min_gain, max_leaf=max_leaf)
-                mse_scores = []
-
-                for train_index, val_index in kf.split(X):
-                    X_train, X_val = X[train_index], X[val_index]
-                    y_train, y_val = y[train_index], y[val_index]
-
-                    model.fit(X_train, y_train)
-                    y_pred = model.predict(X_val)
-                    mse_scores.append(mean_squared_error(y_val, y_pred))
-
-                avg_mse = np.mean(mse_scores)
-                results.append((max_depth, min_gain, max_leaf, avg_mse))
-                print(f"Params: max_depth={max_depth}, min_gain={min_gain}, max_leaf={max_leaf} - MSE: {avg_mse}")
-
-                if avg_mse < best_mse:
-                    best_mse = avg_mse
-                    best_params = (max_depth, min_gain, max_leaf)
-
-    print(
-        f"Best Params: max_depth={best_params[0]}, min_gain={best_params[1]}, max_leaf={best_params[2]} - MSE: {best_mse}")
-    return best_params, results
-
-
-def visualize_grid_search(results):
-    max_depths = [r[0] for r in results]
-    min_gains = [r[1] for r in results]
-    max_leafs = [r[2] for r in results]
-    mses = [r[3] for r in results]
-
-    fig = go.Figure(data=[go.Scatter3d(
-        x=max_depths, y=min_gains, z=max_leafs,
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=mses,
-            colorscale='Viridis',
-            colorbar=dict(title='MSE'),
-            opacity=0.8
-        )
-    )])
-
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='Max Depth',
-            yaxis_title='Min Gain',
-            zaxis_title='Max Leaf'
-        ),
-        title='Grid Search Results'
-    )
-
-    fig.show()
-
-
 if __name__ == '__main__':
-    # Load the data
-    df = pd.read_csv('train_data2.csv', index_col=0)
-    continuous_features = ['macro_state_1', 'macro_state_2']
-    df = preprocess_data(df, continuous_features, n_bins=10)
-    X = df.drop(columns=['outcome']).values
-    y = df['outcome'].values
 
-    # Perform grid search with cross-validation
-    best_params, results = grid_search_with_cv(X, y)
-
-    # Visualize grid search results
-    visualize_grid_search(results)
-
-    # Train the model with the best parameters on the full dataset and save the model
-    model = RandomForest(n_trees=10, max_depth=best_params[0], min_gain=best_params[1], max_leaf=best_params[2])
-    model.fit(X, y)
-
-    # Save the model to disk
-    with open('random_forest_model.pkl', 'wb') as f:
-        pickle.dump(model, f)
-
-    # Load the model from disk
+    # Load the model
     with open('random_forest_model.pkl', 'rb') as f:
         loaded_model = pickle.load(f)
 
-    # Split the data into train and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # read test data
+    test_file = 'train_data2.csv'  # Specify your test data file
+    df_test = pd.read_csv(test_file, index_col=0)
+    continuous_features = ['macro_state_1', 'macro_state_2']
+    df_test = preprocess_data(df_test, continuous_features, n_bins=50)
+    X_test = df_test.values
 
     # Predict on the test set
     y_pred = loaded_model.predict(X_test)
 
-    # Calculate the Mean Squared Error
-    mse = mean_squared_error(y_test, y_pred)
-    print(f'Mean Squared Error on Test Set: {mse}')
+    # Calculate the mean squared error and plot actual vs predicted values
+    y_true = df_test['outcome'].values
+    mse = np.mean((y_true - y_pred) ** 2)
+    print(f'Mean Squared Error: {mse}')
+
+    import matplotlib.pyplot as plt
+    plt.scatter(y_true, y_pred)
+    plt.xlabel('True Values')
+    plt.ylabel('Predicted Values')
+    plt.title('Actual vs Predicted Values')
+    plt.show()
+
+

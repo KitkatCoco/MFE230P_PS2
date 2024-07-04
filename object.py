@@ -5,6 +5,8 @@ from tqdm import tqdm
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import KBinsDiscretizer
+import plotly.graph_objects as go
+
 
 class DecisionTree:
     def __init__(self, max_depth=10, min_gain=0.01, max_leaf=100):
@@ -90,6 +92,7 @@ class DecisionTree:
         else:
             return self._predict_single(x, tree['right'])
 
+
 class RandomForest:
     def __init__(self, n_trees=10, max_depth=10, min_gain=0.01, max_leaf=100):
         self.n_trees = n_trees
@@ -111,20 +114,31 @@ class RandomForest:
         tree_predictions = np.array([tree.predict(X) for tree in tqdm(self.trees, desc="Making Predictions")])
         return np.mean(tree_predictions, axis=0)
 
-def grid_search(X, y):
+
+def preprocess_data(df, continuous_features, n_bins=10):
+    kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
+    df[continuous_features] = kbd.fit_transform(df[continuous_features])
+    return df
+
+
+def grid_search_with_cv(X, y):
     param_grid = {
-        'max_depth': [5, 10, 15],
-        'min_gain': [0.01, 0.05, 0.1],
-        'max_leaf': [50, 100, 150]
+        'max_depth': [5, 10, 15, 20],
+        # 'min_gain': [0.01, 0.05, 0.1],
+        # 'max_leaf': [50, 100, 150]
+        'min_gain': [0.05, 0.1],
+        'max_leaf': [100, 200]
     }
     best_params = None
     best_mse = float('inf')
+    results = []
+
+    kf = KFold(n_splits=5)
 
     for max_depth in param_grid['max_depth']:
         for min_gain in param_grid['min_gain']:
             for max_leaf in param_grid['max_leaf']:
                 model = RandomForest(n_trees=10, max_depth=max_depth, min_gain=min_gain, max_leaf=max_leaf)
-                kf = KFold(n_splits=5)
                 mse_scores = []
 
                 for train_index, val_index in kf.split(X):
@@ -136,42 +150,47 @@ def grid_search(X, y):
                     mse_scores.append(mean_squared_error(y_val, y_pred))
 
                 avg_mse = np.mean(mse_scores)
+                results.append((max_depth, min_gain, max_leaf, avg_mse))
                 print(f"Params: max_depth={max_depth}, min_gain={min_gain}, max_leaf={max_leaf} - MSE: {avg_mse}")
 
                 if avg_mse < best_mse:
                     best_mse = avg_mse
                     best_params = (max_depth, min_gain, max_leaf)
 
-    print(f"Best Params: max_depth={best_params[0]}, min_gain={best_params[1]}, max_leaf={best_params[2]} - MSE: {best_mse}")
-    return best_params
+    print(
+        f"Best Params: max_depth={best_params[0]}, min_gain={best_params[1]}, max_leaf={best_params[2]} - MSE: {best_mse}")
+    return best_params, results
 
-def cross_validation(X, y, best_params):
-    model = RandomForest(n_trees=10, max_depth=best_params[0], min_gain=best_params[1], max_leaf=best_params[2])
-    kf = KFold(n_splits=5)
-    mse_scores = []
 
-    for train_index, val_index in kf.split(X):
-        X_train, X_val = X[train_index], X[val_index]
-        y_train, y_val = y[train_index], y[val_index]
+def visualize_grid_search(results):
+    max_depths = [r[0] for r in results]
+    min_gains = [r[1] for r in results]
+    max_leafs = [r[2] for r in results]
+    mses = [r[3] for r in results]
 
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_val)
-        mse_scores.append(mean_squared_error(y_val, y_pred))
-        print(f"Fold MSE: {mse_scores[-1]}")
+    fig = go.Figure(data=[go.Scatter3d(
+        x=max_depths, y=min_gains, z=max_leafs,
+        mode='markers',
+        marker=dict(
+            size=5,
+            color=mses,
+            colorscale='Viridis',
+            colorbar=dict(title='MSE'),
+            opacity=0.8
+        )
+    )])
 
-    avg_mse = np.mean(mse_scores)
-    print(f"Average MSE: {avg_mse}")
+    fig.update_layout(
+        scene=dict(
+            xaxis_title='Max Depth',
+            yaxis_title='Min Gain',
+            zaxis_title='Max Leaf'
+        ),
+        title='Grid Search Results'
+    )
 
-    # Save the model to disk
-    with open('random_forest_model.pkl', 'wb') as f:
-        pickle.dump(model, f)
+    fig.show()
 
-    return avg_mse
-
-def preprocess_data(df, continuous_features, n_bins=10):
-    kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
-    df[continuous_features] = kbd.fit_transform(df[continuous_features])
-    return df
 
 if __name__ == '__main__':
     # Load the data
@@ -181,18 +200,28 @@ if __name__ == '__main__':
     X = df.drop(columns=['outcome']).values
     y = df['outcome'].values
 
-    # Perform grid search for hyperparameter tuning
-    best_params = grid_search(X, y)
+    # Perform grid search with cross-validation
+    best_params, results = grid_search_with_cv(X, y)
 
-    # Perform 5-fold cross-validation with the best parameters
-    cross_validation(X, y, best_params)
+    # Visualize grid search results
+    visualize_grid_search(results)
+
+    # Train the model with the best parameters on the full dataset and save the model
+    model = RandomForest(n_trees=10, max_depth=best_params[0], min_gain=best_params[1], max_leaf=best_params[2])
+    model.fit(X, y)
+
+    # Save the model to disk
+    with open('random_forest_model.pkl', 'wb') as f:
+        pickle.dump(model, f)
 
     # Load the model from disk
     with open('random_forest_model.pkl', 'rb') as f:
         loaded_model = pickle.load(f)
 
-    # Predict on the test set
+    # Split the data into train and test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Predict on the test set
     y_pred = loaded_model.predict(X_test)
 
     # Calculate the Mean Squared Error

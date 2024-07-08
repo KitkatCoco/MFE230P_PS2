@@ -2,14 +2,17 @@ import numpy as np
 import pandas as pd
 import pickle
 from tqdm import tqdm
+from sklearn.preprocessing import KBinsDiscretizer, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import mean_squared_error
-from sklearn.preprocessing import KBinsDiscretizer
 import plotly.graph_objects as go
 
 
 class DecisionTree:
-    def __init__(self, max_depth=10, min_gain=0.01, max_leaf=100):
+    def __init__(self, max_depth=10, min_gain=0.05, max_leaf=50):
         self.max_depth = max_depth
         self.min_gain = min_gain
         self.max_leaf = max_leaf
@@ -115,14 +118,38 @@ class RandomForest:
         return np.mean(tree_predictions, axis=0)
 
 
-def preprocess_data(df, continuous_features, n_bins=50):
+class RandomForestWrapper(BaseEstimator, RegressorMixin):
+    def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.min_gain = min_gain
+        self.max_leaf = max_leaf
+        self.model = RandomForest(n_trees=n_trees, max_depth=max_depth, min_gain=min_gain, max_leaf=max_leaf)
+
+    def fit(self, X, y):
+        self.model.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
+def create_preprocessing_pipeline(continuous_features, categorical_features, n_bins=10):
     kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
-    df[continuous_features] = kbd.fit_transform(df[continuous_features])
-    return df
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('kbd', kbd, continuous_features),
+            ('ohe', ohe, categorical_features)
+        ],
+        remainder='passthrough'
+    )
+
+    return preprocessor
 
 
 def grid_search_with_cv(X, y):
-
     # first round of coarse grid search
     param_grid = {
         'max_depth': [10, 20, 30],
@@ -212,34 +239,24 @@ if __name__ == '__main__':
     # Load the data
     df = pd.read_csv('train_data2.csv', index_col=0)
     continuous_features = ['macro_state_1', 'macro_state_2']
-    df = preprocess_data(df, continuous_features, n_bins=10)
-    X = df.drop(columns=['outcome']).values
-    y = df['outcome'].values
+    categorical_features = ['category1', 'category2']
+
+    preprocessor = create_preprocessing_pipeline(continuous_features, categorical_features, n_bins=10)
+    pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('model', RandomForestWrapper(n_trees=30, max_depth=10))
+    ])
+
+    X = df.drop(columns=['outcome'])
+    y = df['outcome']
 
     # Perform grid search with cross-validation
-    best_params, results = grid_search_with_cv(X, y)
-
-    # Visualize grid search results
+    best_params, results = grid_search_with_cv(X.values, y.values)
     visualize_grid_search(results)
 
-    # Train the model with the best parameters on the full dataset and save the model
-    model = RandomForest(n_trees=best_params[1], max_depth=best_params[0], min_gain=0.1, max_leaf=200)
-    model.fit(X, y)
+    # Fit the pipeline on the full dataset
+    pipeline.fit(X, y)
 
-    # Save the model to disk
-    with open('random_forest_model.pkl', 'wb') as f:
-        pickle.dump(model, f)
-
-    # Load the model from disk
-    with open('random_forest_model.pkl', 'rb') as f:
-        loaded_model = pickle.load(f)
-
-    # Split the data into train and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Predict on the test set
-    y_pred = loaded_model.predict(X_test)
-
-    # Calculate the Mean Squared Error
-    mse = mean_squared_error(y_test, y_pred)
-    print(f'Mean Squared Error on Test Set: {mse}')
+    # Save the pipeline to disk
+    with open('random_forest_pipeline.pkl', 'wb') as f:
+        pickle.dump(pipeline, f)

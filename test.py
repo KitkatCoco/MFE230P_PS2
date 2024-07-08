@@ -1,11 +1,13 @@
 import numpy as np
 import pandas as pd
 import pickle
-from tqdm import tqdm
-from sklearn.preprocessing import KBinsDiscretizer
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.preprocessing import KBinsDiscretizer, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 class DecisionTree:
-    def __init__(self, max_depth=10, min_gain=0.01, max_leaf=100):
+    def __init__(self, max_depth=10, min_gain=0.05, max_leaf=50):
         self.max_depth = max_depth
         self.min_gain = min_gain
         self.max_leaf = max_leaf
@@ -88,7 +90,6 @@ class DecisionTree:
         else:
             return self._predict_single(x, tree['right'])
 
-
 class RandomForest:
     def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
         self.n_trees = n_trees
@@ -99,7 +100,7 @@ class RandomForest:
 
     def fit(self, X, y):
         self.trees = []
-        for i in tqdm(range(self.n_trees), desc="Training Trees"):
+        for _ in range(self.n_trees):
             indices = np.random.choice(len(X), size=len(X), replace=True)
             X_subset, y_subset = X[indices], y[indices]
             tree = DecisionTree(max_depth=self.max_depth, min_gain=self.min_gain, max_leaf=self.max_leaf)
@@ -107,34 +108,54 @@ class RandomForest:
             self.trees.append(tree)
 
     def predict(self, X):
-        tree_predictions = np.array([tree.predict(X) for tree in tqdm(self.trees, desc="Making Predictions")])
+        tree_predictions = np.array([tree.predict(X) for tree in self.trees])
         return np.mean(tree_predictions, axis=0)
 
+class RandomForestWrapper(BaseEstimator, RegressorMixin):
+    def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.min_gain = min_gain
+        self.max_leaf = max_leaf
+        self.model = RandomForest(n_trees=n_trees, max_depth=max_depth, min_gain=min_gain, max_leaf=max_leaf)
 
-def preprocess_data(df, continuous_features, n_bins=10):
+    def fit(self, X, y):
+        self.model.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+def create_preprocessing_pipeline(continuous_features, categorical_features, n_bins=10):
     kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
-    df[continuous_features] = kbd.fit_transform(df[continuous_features])
-    return df
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
 
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('kbd', kbd, continuous_features),
+            ('ohe', ohe, categorical_features)
+        ],
+        remainder='passthrough'
+    )
+
+    return preprocessor
 
 if __name__ == '__main__':
+    # Load the pipeline
+    with open('random_forest_pipeline.pkl', 'rb') as f:
+        loaded_pipeline = pickle.load(f)
 
-    # Load the model
-    with open('random_forest_model.pkl', 'rb') as f:
-        loaded_model = pickle.load(f)
-
-    # read test data
+    # Read test data
     test_file = 'train_data2.csv'  # Specify your test data file
     df_test = pd.read_csv(test_file, index_col=0)
-    continuous_features = ['macro_state_1', 'macro_state_2']
-    df_test = preprocess_data(df_test, continuous_features, n_bins=50)
-    X_test = df_test.values
+
+    X_test = df_test.drop(columns=['outcome'])
+    y_true = df_test['outcome'].values
 
     # Predict on the test set
-    y_pred = loaded_model.predict(X_test)
+    y_pred = loaded_pipeline.predict(X_test)
 
     # Calculate the mean squared error and plot actual vs predicted values
-    y_true = df_test['outcome'].values
     mse = np.mean((y_true - y_pred) ** 2)
     print(f'Mean Squared Error: {mse}')
 
@@ -144,5 +165,3 @@ if __name__ == '__main__':
     plt.ylabel('Predicted Values')
     plt.title('Actual vs Predicted Values')
     plt.show()
-
-

@@ -10,7 +10,6 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import mean_squared_error
 import plotly.graph_objects as go
 
-
 class DecisionTree:
     def __init__(self, max_depth=10, min_gain=0.05, max_leaf=50):
         self.max_depth = max_depth
@@ -95,7 +94,6 @@ class DecisionTree:
         else:
             return self._predict_single(x, tree['right'])
 
-
 class RandomForest:
     def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
         self.n_trees = n_trees
@@ -117,7 +115,6 @@ class RandomForest:
         tree_predictions = np.array([tree.predict(X) for tree in tqdm(self.trees, desc="Making Predictions")])
         return np.mean(tree_predictions, axis=0)
 
-
 class RandomForestWrapper(BaseEstimator, RegressorMixin):
     def __init__(self, n_trees=10, max_depth=10, min_gain=0.1, max_leaf=200):
         self.n_trees = n_trees
@@ -133,7 +130,6 @@ class RandomForestWrapper(BaseEstimator, RegressorMixin):
     def predict(self, X):
         return self.model.predict(X)
 
-
 def create_preprocessing_pipeline(continuous_features, categorical_features, n_bins=10):
     kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
     ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
@@ -147,7 +143,6 @@ def create_preprocessing_pipeline(continuous_features, categorical_features, n_b
     )
 
     return preprocessor
-
 
 def grid_search_with_cv(X, y):
     # first round of coarse grid search
@@ -205,7 +200,6 @@ def grid_search_with_cv(X, y):
     print(f"Best Params: max_depth={best_params[0]}, n_trees={best_params[1]} - MSE: {best_mse}")
     return best_params, results
 
-
 def visualize_grid_search(results):
     max_depths = [r[0] for r in results]
     n_trees = [r[1] for r in results]
@@ -233,7 +227,6 @@ def visualize_grid_search(results):
     )
 
     fig.show()
-
 
 if __name__ == '__main__':
     # Load the data

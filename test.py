@@ -141,6 +141,7 @@ def create_preprocessing_pipeline(continuous_features, categorical_features, n_b
     return preprocessor
 
 if __name__ == '__main__':
+
     # Load the pipeline
     with open('random_forest_pipeline.pkl', 'rb') as f:
         loaded_pipeline = pickle.load(f)
